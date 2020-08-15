@@ -60,7 +60,7 @@ fn enter_username_menu(curs: &mut Cursive) {
     
     let mut names_view = SelectView::<String>::new();
     let users = unsafe { all_users() };
-    users.map(|u| OsString::from(u.name())).filter_map(|name_osstring| name_osstring.into_string().ok()).for_each(|name_string| names_view.add_item_str(name_string));
+    users.filter(|u| u.uid() >= 1000).map(|u| OsString::from(u.name())).filter_map(|name_osstring| name_osstring.into_string().ok()).for_each(|name_string| names_view.add_item_str(name_string));
     names_view.set_on_submit(change_username);
 
     curs.add_layer(Dialog::around(PaddedView::lrtb(2, 2, 2, 2, names_view))
