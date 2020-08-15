@@ -37,7 +37,7 @@ pub fn start_setup(username: &str, setup: &Setup) -> Result<()> {
 
 pub fn available_setups() -> Result<Vec<Setup>> {
     
-    let sessions_dir = PathBuf::from(r"/usr/share/xsessions");    
+    let sessions_dir = PathBuf::from(r"/etc/moin-dm/sessions"); 
     if !sessions_dir.is_dir() {
         return Err(anyhow!("Session directory does not exist."));
     }
