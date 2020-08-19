@@ -2,7 +2,7 @@
 use std::{env, os::unix::process::CommandExt, process::Command};
 use std::ffi::OsString;
 use std::io::{stdout, Write};
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
 
 use crossterm::{QueueableCommand, terminal::{Clear, ClearType}, cursor::MoveTo};
 use freedesktop_entry_parser::{parse_entry, Entry};
@@ -35,9 +35,10 @@ pub fn start_setup(username: &str, setup: &Setup) -> Result<()> {
 }
 
 
-pub fn available_setups() -> Result<Vec<Setup>> {
+pub fn available_setups(config_dir: &Path) -> Result<Vec<Setup>> {
     
-    let sessions_dir = PathBuf::from(r"/etc/moin-dm/sessions"); 
+    let mut sessions_dir = PathBuf::from(config_dir); 
+    sessions_dir.push(r"sessions");
     if !sessions_dir.is_dir() {
         return Err(anyhow!("Session directory does not exist."));
     }
