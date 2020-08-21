@@ -20,8 +20,8 @@ fn main() {
     setups.push(Default::default());
 
     let selection = match read_last_username(&CONFIG_DIR) {
-        Ok(name) =>   auth_process::user_interaction(&name, setups),
-        Err(_) =>       auth_process::user_interaction("<nobody>", setups),
+        Ok(name) =>   auth_process::user_interaction(&name, setups, &CONFIG_DIR),
+        Err(_) =>       auth_process::user_interaction("<nobody>", setups, &CONFIG_DIR),
     };
 
     if selection.is_complete() {

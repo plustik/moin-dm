@@ -1,18 +1,25 @@
 
+use anyhow::{Result, anyhow};
 use cursive::Cursive;
 use cursive::views::{TextView, Dialog, Button, LinearLayout, EditView, SelectView, DummyView, ResizedView, PaddedView};
+use cursive::theme::{Theme, load_theme_file};
 use cursive::traits::{Identifiable, Resizable};
 use pam::{Authenticator};
 use users::all_users;
 
 use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 
 use crate::setups::{Setup};
 
 
-pub fn user_interaction(default_username: &str, available_setups: Vec<Setup>) -> Selection {
+pub fn user_interaction(default_username: &str, available_setups: Vec<Setup>, config_dir: &Path) -> Selection {
 
     let mut curs = cursive::default();
+
+    // setting theme:
+    let theme = read_cursive_theme(&config_dir).unwrap_or(Theme::default());
+    curs.set_theme(theme);
 
     let description = LinearLayout::vertical()
         .child(TextView::new("User: "))
@@ -60,7 +67,10 @@ fn enter_username_menu(curs: &mut Cursive) {
     
     let mut names_view = SelectView::<String>::new();
     let users = unsafe { all_users() };
-    users.filter(|u| u.uid() >= 1000).map(|u| OsString::from(u.name())).filter_map(|name_osstring| name_osstring.into_string().ok()).for_each(|name_string| names_view.add_item_str(name_string));
+    users.filter(|u| u.uid() >= 1000)
+        .map(|u| OsString::from(u.name()))
+        .filter_map(|name_osstring| name_osstring.into_string().ok())
+        .for_each(|name_string| names_view.add_item_str(name_string));
     names_view.set_on_submit(change_username);
 
     curs.add_layer(Dialog::around(PaddedView::lrtb(2, 2, 2, 2, names_view))
@@ -71,6 +81,7 @@ fn enter_username_menu(curs: &mut Cursive) {
 
 fn change_username(curs: &mut Cursive, new_name: &str) {
     curs.call_on_name("username", |view: &mut TextView| view.set_content(new_name));    
+    curs.focus_name("password").unwrap();
     curs.pop_layer();
 }
 
@@ -145,5 +156,18 @@ impl Selection {
 
     pub fn is_complete(&self) -> bool {
         self.username.is_some() && self.setup.is_some()
+    }
+}
+
+
+fn read_cursive_theme(config_path: &Path) -> Result<Theme> {
+    
+    let mut path = PathBuf::from(config_path);
+    path.push(r"theme.toml");
+
+    match load_theme_file(&path) {
+        Ok(theme)   => Ok(theme),
+        Err(cursive::theme::Error::Io(_))   => Err(anyhow!("Could not read from file: {:?}", path)),
+        Err(cursive::theme::Error::Parse(_))    =>Err( anyhow!("Could not parse file: {:?}", path)),
     }
 }
