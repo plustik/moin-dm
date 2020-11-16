@@ -23,7 +23,7 @@ fn main() {
              .short("c")
              .long("config")
              .value_name("DIR")
-             .help("Sets a custom condig directory.")
+             .help("Sets a custom config directory.")
              .takes_value(true)
              .default_value("/etc/moin-dm"))
         .arg(Arg::with_name("no-login")
