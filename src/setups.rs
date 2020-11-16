@@ -10,28 +10,55 @@ use users::{get_user_by_name, os::unix::UserExt};
 use anyhow::{Result, anyhow};
 
 
-pub fn start_setup(username: &str, setup: &Setup) -> Result<()> {
-
-    // clear the terminal:
-    let mut stdout = stdout();
-    stdout.queue(Clear(ClearType::All)).expect("Could not queue Command.");
-    stdout.queue(MoveTo(0, 0)).expect("Could not queue Command.");
-    stdout.flush().expect("Could not flush commands.");
+pub fn start_session(username: &str, cmd_opt: Option<&str>) -> Result<()> {
 
     let user = get_user_by_name(&OsString::from(username)).ok_or(anyhow!("Could not get user."))?;
 
     env::set_current_dir(user.home_dir())?;
+
+    // start the login shell:
     let mut child = Command::new(user.shell());
     child.uid(user.uid());
     child.gid(user.primary_group_id());
+    // start as login shell:
     child.arg("-l");
-    if let Some(cmd_arg) = setup.command() {
+    // start setup:
+    if let Some(cmd_arg) = cmd_opt {
         child.arg(cmd_arg);
     }
-        
     child.spawn()?.wait()?;
 
     Ok(())
+}
+
+pub fn start_with_new_session(username: &str, setup: &Setup) -> Result<()> {
+
+    clear_terminal();
+
+    start_session(username, setup.command())
+}
+
+pub fn start_with_existing_session(setup: &Setup) -> Result<()> {
+
+    clear_terminal();
+
+    if let Some(setup_cmd) = setup.command() {
+        //split command to file and arguments:
+        let mut parts = setup_cmd.split(' ');
+        // execute setup command:
+        let mut child = Command::new(parts.next().expect("The given argument contains no command."));
+        child.args(parts);
+        child.spawn().expect("Could not spawn setup process.").wait().expect("Setup process failed while running.");
+    }
+
+    Ok(())
+}
+
+fn clear_terminal() {
+    let mut stdout = stdout();
+    stdout.queue(Clear(ClearType::All)).expect("Could not queue Command.");
+    stdout.queue(MoveTo(0, 0)).expect("Could not queue Command.");
+    stdout.flush().expect("Could not flush commands.");
 }
 
 

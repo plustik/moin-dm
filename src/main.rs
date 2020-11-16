@@ -3,37 +3,74 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{PathBuf, Path};
 
-use anyhow::Result;
+extern crate anyhow;
+use anyhow::{anyhow, Result};
+extern crate clap;
+use clap::{Arg, App};
 
 
 mod setups;
-mod auth_process;
+mod cli;
 
 
 fn main() {
 
-    #[allow(non_snake_case)]
-    let CONFIG_DIR = PathBuf::from(r"/etc/moin-dm");
+    let matches = App::new("moin-dm")
+        .version("0.2")
+        .author("Simeon Ricking <simeon.ricking@posteo.de>")
+        .about("A command line interface for logging in and selecting a user session.")
+        .arg(Arg::with_name("config-dir")
+             .short("c")
+             .long("config")
+             .value_name("DIR")
+             .help("Sets a custom condig directory.")
+             .takes_value(true)
+             .default_value("/etc/moin-dm"))
+        .arg(Arg::with_name("no-login")
+             .long("no-login")
+             .help("If set, moin-dm will assume the user is already logged in and just start the selected setup.")
+             .takes_value(false))
+        .get_matches();
 
+    let config_dir = PathBuf::from(matches.value_of("config-dir").unwrap());
+    let login = !matches.is_present("no-login");
 
-    let mut setups: Vec<setups::Setup> = setups::available_setups(&CONFIG_DIR).unwrap_or(Vec::new());
-    setups.push(Default::default());
+    let mut instance = cli::ViewInstance::new(&config_dir);
 
-    let selection = match read_last_username(&CONFIG_DIR) {
-        Ok(name) =>   auth_process::user_interaction(&name, setups, &CONFIG_DIR),
-        Err(_) =>       auth_process::user_interaction("<nobody>", setups, &CONFIG_DIR),
-    };
-
-    if selection.is_complete() {
-        let username = selection.username().unwrap();
-        if let Err(e) = save_last_username(&CONFIG_DIR, username) {
-            println!("{}", e);
-        }
-        setups::start_setup(username, selection.setup().unwrap()).expect("Could not start setup.");
-    } else {
-        println!("Could not get selection.");
+    if login {
+        match read_last_username(&config_dir) {
+            Ok(name) =>  instance.add_login(&name),
+            Err(_) =>    instance.add_login("<nobody>"),
+        };
     }
 
+    let mut setups: Vec<setups::Setup> = setups::available_setups(&config_dir).unwrap_or(Vec::new());
+    setups.push(Default::default());
+    instance.add_setups(setups);
+
+    let selection = instance.run_interaction();
+    test_selection(&selection, login).expect("Selection had missing answers.");
+
+    if login {
+        let username = selection.username().unwrap();
+        if let Err(e) = save_last_username(&config_dir, username) {
+            println!("{}", e);
+        }
+        setups::start_with_new_session(username, selection.setup().unwrap()).expect("Could not start setup.");
+    } else {
+        setups::start_with_existing_session(selection.setup().unwrap()).expect("Could not start setup.");
+    }
+}
+
+
+fn test_selection(selection: &cli::Selection, login: bool) -> Result<()> {
+    if !selection.has_setup() {
+        Err(anyhow!("Setup was not set in selection."))
+    } else if login && !selection.is_complete() {
+        Err(anyhow!("Username was not set in selection"))
+    } else {
+        Ok(())
+    }
 }
 
 
