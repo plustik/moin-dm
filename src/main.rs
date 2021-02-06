@@ -1,16 +1,17 @@
 
-use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
-use std::path::{PathBuf, Path};
+use std::{
+    env::var_os,
+    path::PathBuf,
+};
 
 extern crate anyhow;
-use anyhow::{anyhow, Result};
 extern crate clap;
 use clap::{Arg, App};
 
 
 mod setups;
-mod cli;
+mod simple_cli;
+mod graphic_cli;
 
 
 fn main() {
@@ -19,90 +20,105 @@ fn main() {
         .version("0.2")
         .author("Simeon Ricking <simeon.ricking@posteo.de>")
         .about("A command line interface for logging in and selecting a user session.")
-        .arg(Arg::with_name("config-dir")
+        .arg(Arg::with_name("CONFIG-DIR")
              .short("c")
              .long("config")
              .value_name("DIR")
              .help("Sets a custom config directory.")
+             .long_help(
+                 "Sets the path to the config directory which contains the setups to choose from.
+                 If this argument is not given, the first existing directory from the following list is choosen:
+                 $XDG_CONFIG_HOME/moin-dm/
+                 $HOME/.config/moin-dm/
+                 /etc/moin-dm/
+                 /usr/share/moin-dm/")
+             .takes_value(true))
+        .arg(Arg::with_name("INTERFACE")
+             .short("i")
+             .long("interface")
+             .value_name("UI")
+             .help("Sets the UI that is used.")
+             .long_help(
+                 "Sets the UI that is used to let the user choose the setup.")
              .takes_value(true)
-             .default_value("/etc/moin-dm"))
-        .arg(Arg::with_name("no-login")
-             .long("no-login")
-             .help("If set, moin-dm will assume the user is already logged in and just start the selected setup.")
-             .takes_value(false))
+             .default_value("simple")
+             .possible_values(&["simple", "graphic"]))
         .get_matches();
 
-    let config_dir = PathBuf::from(matches.value_of("config-dir").unwrap());
-    let login = !matches.is_present("no-login");
+    let config_dir = if let Some(path) = select_config_dir(matches.value_of("CONFIG-DIR").map(|str| PathBuf::from(str) )) {
+        path
+    } else {
+        println!("The given directory does not exist.");
+        return;
+    };
 
-    let mut instance = cli::ViewInstance::new(&config_dir);
+    let setups: Vec<setups::Setup> = setups::available_setups(&config_dir).unwrap_or(Vec::new());
 
-    if login {
-        match read_last_username(&config_dir) {
-            Ok(name) =>  instance.add_login(&name),
-            Err(_) =>    instance.add_login("<nobody>"),
-        };
-    }
-
-    let mut setups: Vec<setups::Setup> = setups::available_setups(&config_dir).unwrap_or(Vec::new());
-    setups.push(Default::default());
-    instance.add_setups(setups);
-
-    let selection = instance.run_interaction();
-    test_selection(&selection, login).expect("Selection had missing answers.");
-
-    if login {
-        let username = selection.username().unwrap();
-        if let Err(e) = save_last_username(&config_dir, username) {
+    let selection = match matches.value_of("INTERFACE").unwrap() {
+        "simple" => {
+            simple_cli::run(setups, &config_dir)
+        },
+        "graphic" => {
+            graphic_cli::run(setups)
+        },
+        _ => {
+            panic!("Unexpected value for argument 'inteface'.");
+        },
+    };
+    match selection {
+        Ok(s) => {
+            // Start setup:
+            if let Err(e) = s.run() {
+                println!("{}", e);
+            }
+        },
+        Err(e) => {
             println!("{}", e);
+        },
+    }
+}
+
+
+/// Returns the directory from which the Setups should be choosen:
+fn select_config_dir(user_arg: Option<PathBuf>) -> Option<PathBuf> {
+
+    // Return the directory given by the user, if it exists:
+    if let Some(path) = user_arg {
+        if path.is_dir() {
+            return Some(path);
         }
-        setups::start_with_new_session(username, selection.setup().unwrap()).expect("Could not start setup.");
-    } else {
-        setups::start_with_existing_session(selection.setup().unwrap()).expect("Could not start setup.");
     }
-}
 
-
-fn test_selection(selection: &cli::Selection, login: bool) -> Result<()> {
-    if !selection.has_setup() {
-        Err(anyhow!("Setup was not set in selection."))
-    } else if login && !selection.is_complete() {
-        Err(anyhow!("Username was not set in selection"))
-    } else {
-        Ok(())
+    // Return $XDG_CONFIG_HOME/moin-dm, if it exists:
+    if let Some(config_home) = var_os("XDG_CONFIG_HOME") {
+        let mut xdg_dir = PathBuf::from(config_home);
+        xdg_dir.push(r"moin-dm");
+        if xdg_dir.is_dir() {
+            return Some(xdg_dir);
+        }
     }
-}
 
-
-fn read_last_username(config_dir: &Path) -> Result<String> {
-    let mut file_path = PathBuf::from(config_dir);
-    file_path.push(r"last_username");
-
-    let mut file = File::open(file_path)?;
-    let mut name_buf = Vec::new();
-    file.read_to_end(&mut name_buf)?;
-
-    let res = String::from_utf8(name_buf)?;
-
-    Ok(res)
-}
-
-fn save_last_username(config_dir: &Path, new_username: &str) -> Result<()> {
-    let mut file_path = PathBuf::from(config_dir);
-    file_path.push(r"last_username");
-
-    let mut file = OpenOptions::new()
-                    .create(true)
-                    .write(true)
-                    .truncate(true)
-                    .open(file_path)?;
-
-    let mut bytes_written = 0;
-    while bytes_written < new_username.len() {
-        bytes_written += file.write(new_username.as_bytes())?;
+    // Return $HOME/.config/moin-dm, if it exists:
+    if let Some(home_dir) = var_os("HOME") {
+        let mut config_dir = PathBuf::from(home_dir);
+        config_dir.push(r".config/moin-dm");
+        if config_dir.is_dir() {
+            return Some(config_dir);
+        }
     }
-    file.flush()?;
 
-    Ok(())
+    // Return /etc/moin-dm, if it exists:
+    let etc_dir = PathBuf::from(r"/etc/moin-dm");
+    if etc_dir.is_dir() {
+        return Some(etc_dir);
+    }
+
+    // Return /usr/share/moin-dm, if it exists:
+    let usr_dir = PathBuf::from(r"/usr/share/moin-dm");
+    if usr_dir.is_dir() {
+        return Some(usr_dir);
+    }
+
+
+    None
 }
-
